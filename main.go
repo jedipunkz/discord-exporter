@@ -36,7 +36,6 @@ func init() {
 		log.Fatalf("Error reading config file, %s", err)
 	}
 
-	// Prometheusメトリクスを登録
 	prometheus.MustRegister(memberCountGauge)
 	prometheus.MustRegister(messageCountGauge)
 }
@@ -74,7 +73,7 @@ func updateMessageCount(discordSession *discordgo.Session, serverID string) {
 }
 
 func main() {
-	token := viper.GetString("token") // tokenを取得
+	token := viper.GetString("token")
 	serverID = viper.GetString("serverID")
 
 	if token == "" {
