@@ -96,7 +96,7 @@ func main() {
 		for {
 			updateMemberCount(discordSession, serverID)
 			updateMessageCount(discordSession, serverID)
-			time.Sleep(5 * time.Minute)
+			time.Sleep(15 * time.Minute)
 		}
 	}()
 
