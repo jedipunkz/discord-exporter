@@ -13,3 +13,4 @@ services:
     build: .
     ports:
       - 2112:2112
+    restart: always
