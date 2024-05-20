@@ -59,7 +59,19 @@ func updateMessageCount(discordSession *discordgo.Session, serverID string) {
 		return
 	}
 
+	// 除外するチャンネル名のリスト
+	excludedChannels := map[string]struct{}{
+		"パダワン部屋": {},
+		"入室通知":   {},
+		// 他のチャンネル名を追加...
+	}
+
 	for _, channel := range channels {
+		// チャンネルが除外リストに含まれている場合、次のチャンネルへ
+		if _, excluded := excludedChannels[channel.Name]; excluded {
+			continue
+		}
+
 		var lastMessageID string
 		totalMessageCount := 0
 
