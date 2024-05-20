@@ -60,15 +60,28 @@ func updateMessageCount(discordSession *discordgo.Session, serverID string) {
 	}
 
 	for _, channel := range channels {
-		messages, err := discordSession.ChannelMessages(channel.ID, 100, "", "", "")
-		if err != nil {
-			log.Printf("Failed to get messages for channel %s: %v", channel.ID, err)
-			continue
+		var lastMessageID string
+		totalMessageCount := 0
+
+		for {
+			messages, err := discordSession.ChannelMessages(channel.ID, 100, lastMessageID, "", "")
+			if err != nil {
+				log.Printf("Failed to get messages for channel %s: %v", channel.ID, err)
+				break
+			}
+
+			messageCount := len(messages)
+			totalMessageCount += messageCount
+
+			if messageCount < 100 {
+				break
+			}
+
+			lastMessageID = messages[messageCount-1].ID
 		}
 
-		messageCount := len(messages)
-		messageCountGauge.WithLabelValues(channel.Name).Set(float64(messageCount))
-		log.Printf("Message count for channel %s: %v", channel.Name, float64(messageCount))
+		messageCountGauge.WithLabelValues(channel.Name).Set(float64(totalMessageCount))
+		log.Printf("Message count for channel %s: %v", channel.Name, float64(totalMessageCount))
 	}
 }
 
