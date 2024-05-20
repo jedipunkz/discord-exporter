@@ -93,8 +93,8 @@ func updateMessageCount(discordSession *discordgo.Session, serverID string) {
 		}
 
 		messageCountGauge.WithLabelValues(channel.Name).Set(float64(totalMessageCount))
-		log.Printf("Message count for channel %s: %v", channel.Name, float64(totalMessageCount))
 	}
+	log.Printf("Message count: %v", messageCountGauge)
 }
 
 func main() {
