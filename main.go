@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -59,11 +60,17 @@ func updateMessageCount(discordSession *discordgo.Session, serverID string) {
 		return
 	}
 
-	// 除外するチャンネル名のリスト
-	excludedChannels := map[string]struct{}{
-		"パダワン部屋": {},
-		"入室通知":   {},
-		// 他のチャンネル名を追加...
+	// 設定ファイルから除外するチャンネル名のリストを読み込む
+	excludedChannels := make(map[string]struct{})
+	excludeChannelsStr := viper.GetString("excludeChannels")
+	if excludeChannelsStr != "" {
+		channelNames := strings.Split(excludeChannelsStr, ",")
+		for _, name := range channelNames {
+			trimmedName := strings.TrimSpace(name)
+			if trimmedName != "" {
+				excludedChannels[trimmedName] = struct{}{}
+			}
+		}
 	}
 
 	for _, channel := range channels {
