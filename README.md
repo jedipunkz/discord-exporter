@@ -14,6 +14,7 @@ Discord Exporter is an exporter for retrieving the number of members in a Discor
 ```
 token: YOUR_DISCORD_TOKEN
 serverID: YOUR_SERVER_ID
+excludeChannels: CHANNEL_NAME,...
 ```
 2. Use Docker-Compose to build and run the application.
 
