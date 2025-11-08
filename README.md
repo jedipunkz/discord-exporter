@@ -27,6 +27,3 @@ docker-compose up -d
 ## Metrics
 - discord_members_count: The number of members in the Discord server
 - discord_message_count: The number of messages in each channel
-
-## Note
-This exporter adheres to Discord's API rate limits. If you have a large number of channels or messages, it may not be possible to retrieve all messages at once.
