@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -21,6 +22,7 @@ const (
 	// Application settings
 	defaultMetricsPort    = ":2112"
 	defaultUpdateInterval = 15 * time.Minute
+	maxConcurrentChannels = 5 // Maximum number of channels to process concurrently
 )
 
 var (
@@ -128,30 +130,98 @@ func countChannelMessages(session *discordgo.Session, channelID string) (int, er
 	return totalCount, nil
 }
 
+// channelCountResult holds the result of counting messages in a channel
+type channelCountResult struct {
+	channelName string
+	count       int
+	err         error
+}
+
+// processChannel processes a single channel and sends the result to the results channel
+func processChannel(session *discordgo.Session, channel *discordgo.Channel, results chan<- channelCountResult) {
+	totalCount, err := countChannelMessages(session, channel.ID)
+	results <- channelCountResult{
+		channelName: channel.Name,
+		count:       totalCount,
+		err:         err,
+	}
+}
+
 // updateMessageCount fetches and updates the message count metrics for all channels
+// Uses concurrent processing with a worker pool to improve performance
 func updateMessageCount(session *discordgo.Session, config *Config) {
+	startTime := time.Now()
+
 	channels, err := session.GuildChannels(config.ServerID)
 	if err != nil {
 		log.Printf("Failed to get guild channels: %v", err)
 		return
 	}
 
+	// Filter out excluded channels and non-text channels
+	var activeChannels []*discordgo.Channel
 	for _, channel := range channels {
-		// Skip excluded channels
+		// Skip non-text channels (voice, category, etc.)
+		if channel.Type != discordgo.ChannelTypeGuildText {
+			continue
+		}
+
 		if _, excluded := config.ExcludedChannels[channel.Name]; excluded {
 			log.Printf("Skipping excluded channel: %s", channel.Name)
 			continue
 		}
+		activeChannels = append(activeChannels, channel)
+	}
 
-		totalCount, err := countChannelMessages(session, channel.ID)
-		if err != nil {
-			log.Printf("Failed to count messages for channel %s: %v", channel.Name, err)
+	if len(activeChannels) == 0 {
+		log.Println("No active channels to process")
+		return
+	}
+
+	log.Printf("Processing %d channels concurrently (max %d workers)", len(activeChannels), maxConcurrentChannels)
+
+	// Create channels for communication
+	results := make(chan channelCountResult, len(activeChannels))
+	semaphore := make(chan struct{}, maxConcurrentChannels)
+	var wg sync.WaitGroup
+
+	// Process channels concurrently
+	for _, channel := range activeChannels {
+		wg.Add(1)
+		go func(ch *discordgo.Channel) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			processChannel(session, ch, results)
+		}(channel)
+	}
+
+	// Wait for all goroutines to complete and close results channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	successCount := 0
+	errorCount := 0
+	for result := range results {
+		if result.err != nil {
+			log.Printf("Failed to count messages for channel %s: %v", result.channelName, result.err)
+			errorCount++
 			continue
 		}
 
-		messageCountGauge.WithLabelValues(channel.Name).Set(float64(totalCount))
-		log.Printf("Channel %s: %d messages", channel.Name, totalCount)
+		messageCountGauge.WithLabelValues(result.channelName).Set(float64(result.count))
+		log.Printf("Channel %s: %d messages", result.channelName, result.count)
+		successCount++
 	}
+
+	elapsed := time.Since(startTime)
+	log.Printf("Message count update completed in %v (%d successful, %d errors)", elapsed, successCount, errorCount)
 }
 
 // startMetricsCollector starts a goroutine that periodically updates metrics
