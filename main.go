@@ -93,17 +93,18 @@ func parseExcludedChannels(channelsStr string) map[string]struct{} {
 	return excluded
 }
 
-// updateMemberCount fetches and updates the member count metric
+// updateMemberCount fetches and updates the member count metric.
+// Uses Guild API to get the member count in a single API call instead of
+// paginating through all members.
 func updateMemberCount(session *discordgo.Session, serverID string) {
-	members, err := session.GuildMembers(serverID, "", maxMembersPerRequest)
+	guild, err := session.Guild(serverID)
 	if err != nil {
-		log.Printf("Failed to get guild members: %v", err)
+		log.Printf("Failed to get guild: %v", err)
 		return
 	}
 
-	memberCount := len(members)
-	memberCountGauge.Set(float64(memberCount))
-	log.Printf("Member count: %d", memberCount)
+	memberCountGauge.Set(float64(guild.MemberCount))
+	log.Printf("Member count: %d", guild.MemberCount)
 }
 
 // countChannelMessages counts all messages in a given channel
@@ -224,13 +225,32 @@ func updateMessageCount(session *discordgo.Session, config *Config) {
 	log.Printf("Message count update completed in %v (%d successful, %d errors)", elapsed, successCount, errorCount)
 }
 
-// startMetricsCollector starts a goroutine that periodically updates metrics
+// collectMetrics runs both metric updates concurrently and waits for both to finish.
+func collectMetrics(session *discordgo.Session, config *Config) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		updateMemberCount(session, config.ServerID)
+	}()
+	go func() {
+		defer wg.Done()
+		updateMessageCount(session, config)
+	}()
+	wg.Wait()
+}
+
+// startMetricsCollector starts a goroutine that periodically updates metrics.
+// Uses a ticker so the interval is wall-clock based regardless of how long
+// each collection takes.
 func startMetricsCollector(session *discordgo.Session, config *Config) {
 	go func() {
-		for {
-			updateMemberCount(session, config.ServerID)
-			updateMessageCount(session, config)
-			time.Sleep(defaultUpdateInterval)
+		collectMetrics(session, config)
+
+		ticker := time.NewTicker(defaultUpdateInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			collectMetrics(session, config)
 		}
 	}()
 }
