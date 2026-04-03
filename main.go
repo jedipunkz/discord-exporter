@@ -25,6 +25,17 @@ const (
 	maxConcurrentChannels = 5 // Maximum number of channels to process concurrently
 )
 
+// channelCache holds incremental counting state per channel
+type channelCache struct {
+	newestMessageID string
+	totalCount      int
+}
+
+var (
+	channelCacheMu sync.RWMutex
+	channelCaches  = make(map[string]*channelCache)
+)
+
 var (
 	memberCountGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "discord_members_count",
@@ -106,26 +117,104 @@ func updateMemberCount(session *discordgo.Session, serverID string) {
 	log.Printf("Member count: %d", memberCount)
 }
 
-// countChannelMessages counts all messages in a given channel
+// countChannelMessages counts messages in a channel using incremental counting.
+// On the first call it fetches all messages and caches the newest message ID.
+// On subsequent calls it only fetches messages newer than the cached ID.
 func countChannelMessages(session *discordgo.Session, channelID string) (int, error) {
-	var lastMessageID string
+	channelCacheMu.RLock()
+	cache, hasCached := channelCaches[channelID]
+	channelCacheMu.RUnlock()
+
+	if hasCached {
+		return countNewMessages(session, channelID, cache)
+	}
+	return countAllMessages(session, channelID)
+}
+
+// countAllMessages fetches all messages in a channel from scratch and populates the cache.
+func countAllMessages(session *discordgo.Session, channelID string) (int, error) {
+	var beforeID string
+	var newestMessageID string
 	totalCount := 0
 
 	for {
-		messages, err := session.ChannelMessages(channelID, maxMessagesPerRequest, lastMessageID, "", "")
+		messages, err := session.ChannelMessages(channelID, maxMessagesPerRequest, beforeID, "", "")
 		if err != nil {
 			return 0, fmt.Errorf("failed to get messages: %w", err)
 		}
 
 		messageCount := len(messages)
+		if messageCount == 0 {
+			break
+		}
+
+		// First batch: messages[0] is the newest message overall
+		if newestMessageID == "" {
+			newestMessageID = messages[0].ID
+		}
+
 		totalCount += messageCount
 
 		if messageCount < maxMessagesPerRequest {
 			break
 		}
 
-		lastMessageID = messages[messageCount-1].ID
+		beforeID = messages[messageCount-1].ID
 	}
+
+	if newestMessageID != "" {
+		channelCacheMu.Lock()
+		channelCaches[channelID] = &channelCache{
+			newestMessageID: newestMessageID,
+			totalCount:      totalCount,
+		}
+		channelCacheMu.Unlock()
+	}
+
+	return totalCount, nil
+}
+
+// countNewMessages fetches only messages newer than the cached message ID and adds them to the total.
+func countNewMessages(session *discordgo.Session, channelID string, cache *channelCache) (int, error) {
+	afterID := cache.newestMessageID
+	newCount := 0
+	var newestMessageID string
+
+	for {
+		// "after" returns messages in ascending order (oldest first in the batch)
+		messages, err := session.ChannelMessages(channelID, maxMessagesPerRequest, "", afterID, "")
+		if err != nil {
+			return 0, fmt.Errorf("failed to get messages: %w", err)
+		}
+
+		messageCount := len(messages)
+		if messageCount == 0 {
+			break
+		}
+
+		// The last message in the batch is the newest
+		newestMessageID = messages[messageCount-1].ID
+		newCount += messageCount
+
+		if messageCount < maxMessagesPerRequest {
+			break
+		}
+
+		afterID = newestMessageID
+	}
+
+	totalCount := cache.totalCount + newCount
+	updatedNewest := cache.newestMessageID
+	if newestMessageID != "" {
+		updatedNewest = newestMessageID
+	}
+
+	channelCacheMu.Lock()
+	channelCaches[channelID] = &channelCache{
+		newestMessageID: updatedNewest,
+		totalCount:      totalCount,
+	}
+	channelCacheMu.Unlock()
 
 	return totalCount, nil
 }
