@@ -94,17 +94,17 @@ func parseExcludedChannels(channelsStr string) map[string]struct{} {
 }
 
 // updateMemberCount fetches and updates the member count metric.
-// Uses Guild API to get the member count in a single API call instead of
-// paginating through all members.
+// Uses GuildWithCounts API to get the member count with with_counts=true
+// so that ApproximateMemberCount is populated.
 func updateMemberCount(session *discordgo.Session, serverID string) {
-	guild, err := session.Guild(serverID)
+	guild, err := session.GuildWithCounts(serverID)
 	if err != nil {
 		log.Printf("Failed to get guild: %v", err)
 		return
 	}
 
-	memberCountGauge.Set(float64(guild.MemberCount))
-	log.Printf("Member count: %d", guild.MemberCount)
+	memberCountGauge.Set(float64(guild.ApproximateMemberCount))
+	log.Printf("Member count: %d", guild.ApproximateMemberCount)
 }
 
 // countChannelMessages counts all messages in a given channel
