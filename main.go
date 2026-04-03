@@ -162,7 +162,12 @@ func updateMessageCount(session *discordgo.Session, config *Config) {
 	// Filter out excluded channels and non-text channels
 	var activeChannels []*discordgo.Channel
 	for _, channel := range channels {
-		// Skip non-text channels (voice, category, etc.)
+		// Skip voice channels
+		if channel.Type == discordgo.ChannelTypeGuildVoice || channel.Type == discordgo.ChannelTypeGuildStageVoice {
+			log.Printf("Skipping voice channel: %s", channel.Name)
+			continue
+		}
+		// Skip non-text channels (category, etc.)
 		if channel.Type != discordgo.ChannelTypeGuildText {
 			continue
 		}
